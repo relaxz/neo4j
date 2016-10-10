@@ -30,6 +30,7 @@ import com.hazelcast.core.MembershipEvent;
 import com.hazelcast.core.MembershipListener;
 import com.hazelcast.instance.GroupProperties;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -43,6 +44,8 @@ import org.neo4j.kernel.configuration.Config;
 import org.neo4j.kernel.lifecycle.LifecycleAdapter;
 import org.neo4j.logging.Log;
 import org.neo4j.logging.LogProvider;
+
+import static org.neo4j.coreedge.discovery.HazelcastClusterTopology.DISCOVERY_SERVER;
 
 class HazelcastCoreTopologyService extends LifecycleAdapter implements CoreTopologyService, MembershipListener
 {
@@ -101,9 +104,8 @@ class HazelcastCoreTopologyService extends LifecycleAdapter implements CoreTopol
     private void notifyMembershipChange( ClusterTopology clusterTopology )
     {
         Set<AdvertisedSocketAddress> members = hazelcastInstance.getCluster().getMembers().stream()
-                .map( member -> new AdvertisedSocketAddress(
-                        String.format( "%s:%d", member.getSocketAddress().getHostName(),
-                                member.getSocketAddress().getPort() ) ) ).collect( Collectors.toSet() );
+                .map( member -> new AdvertisedSocketAddress( member.getStringAttribute( DISCOVERY_SERVER ) ) )
+                .collect( Collectors.toSet() );
         discoveredMemberRepository.store( members );
         listenerService.notifyListeners( clusterTopology );
     }
@@ -145,18 +147,19 @@ class HazelcastCoreTopologyService extends LifecycleAdapter implements CoreTopol
         TcpIpConfig tcpIpConfig = joinConfig.getTcpIpConfig();
         tcpIpConfig.setEnabled( true );
 
-        List<AdvertisedSocketAddress> initialMembers =
-                config.get( CoreEdgeClusterSettings.initial_discovery_members );
-        for ( AdvertisedSocketAddress address : initialMembers )
+        List<AdvertisedSocketAddress> initialMembers = config.get( CoreEdgeClusterSettings.initial_discovery_members );
+        Set<AdvertisedSocketAddress> previouslySeenMembers = discoveredMemberRepository.previouslyDiscoveredMembers();
+
+        Set<AdvertisedSocketAddress> members = new LinkedHashSet<>();
+        members.addAll( initialMembers );
+        members.addAll( previouslySeenMembers );
+
+        for ( AdvertisedSocketAddress address : members )
         {
             tcpIpConfig.addMember( address.toString() );
         }
-        Set<AdvertisedSocketAddress> previouslySeenMembers = discoveredMemberRepository.previouslyDiscoveredMembers();
-        for ( AdvertisedSocketAddress seenAddress : previouslySeenMembers )
-        {
-            tcpIpConfig.addMember( seenAddress.toString() );
-        }
-        log.info( String.format( "Discovering cluster with initial members: %s and previously seen members: %s",
+
+        log.info( String.format( "Discovering cluster with initial members: %s and previously discovered members: %s",
                 initialMembers, previouslySeenMembers ) );
 
         NetworkConfig networkConfig = new NetworkConfig();
