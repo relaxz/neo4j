@@ -81,7 +81,7 @@ object CastSupport {
 
       case (_: Double, _: Number) => a
 
-      case _ => throw new CypherTypeException("Collections containing mixed types can not be stored in properties. Nor can null values be stored")
+      case _ => throw new CypherTypeException("Collections can't store mixed types nor null values");
     }
   }
 
